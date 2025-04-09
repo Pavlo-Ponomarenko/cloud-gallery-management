@@ -92,6 +92,46 @@ resource "aws_security_group" "allow_port_5000" {
   }
 }
 
+resource "aws_iam_role" "app_role" {
+  name = "cloud-gallery-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "cloudwatch_policy" {
+  name = "cloudwatch-policy"
+  role = aws_iam_role.app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Action = [
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+        "logs:DescribeLogGroups",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream"
+      ],
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "cloud-gallery_profile" {
+  name = "cloud-gallery-instance-profile"
+  role = aws_iam_role.app_role.name
+}
+
 resource "aws_instance" "cloud_gallery" {
   ami           = "ami-0ecf75a98fe8519d7"
   instance_type = "t2.micro"
@@ -100,22 +140,13 @@ resource "aws_instance" "cloud_gallery" {
     aws_security_group.allow_port_5000.id
   ]
 
+  iam_instance_profile = aws_iam_instance_profile.cloud-gallery_profile.name
+
   key_name = aws_key_pair.ssh_key.key_name
 
   associate_public_ip_address = true
 
-  user_data = <<-EOF
-              #!/bin/bash
-
-              yum update -y
-              yum install -y git
-              yum install -y python3
-              yum install pip
-              pip3 install flask
-              git clone https://github.com/Pavlo-Ponomarenko/cloud-gallery.git
-              cd cloud-gallery
-              python3 -m flask --app App run --host=0.0.0.0
-            EOF
+  user_data = file("${path.module}/scripts/init_cloud-gallery_instance.sh")
 
   tags = {
     Name = "Cloud Gallery"
