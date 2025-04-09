@@ -2,8 +2,9 @@
 
 yum update -y
 yum install -y git python3 pip amazon-cloudwatch-agent
-pip3 install flask
+pip3 install flask boto3
 git clone https://github.com/Pavlo-Ponomarenko/cloud-gallery.git
+export IMAGES_SOURCE=s3
 cd cloud-gallery
 python3 -m flask --app App run --host=0.0.0.0 &
 cd ..

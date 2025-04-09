@@ -127,6 +127,28 @@ resource "aws_iam_role_policy" "cloudwatch_policy" {
   })
 }
 
+resource "aws_iam_role_policy" "s3_read_policy" {
+  name = "s3-read-only-policy"
+  role = aws_iam_role.app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ],
+        Resource = [
+          "arn:aws:s3:::images-cloud-storage",
+          "arn:aws:s3:::images-cloud-storage/*"
+        ]
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "cloud-gallery_profile" {
   name = "cloud-gallery-instance-profile"
   role = aws_iam_role.app_role.name
@@ -151,4 +173,9 @@ resource "aws_instance" "cloud_gallery" {
   tags = {
     Name = "Cloud Gallery"
   }
+}
+
+resource "aws_s3_bucket" "gallery_storage_bucket" {
+  bucket = "images-cloud-storage"
+  force_destroy = true
 }
