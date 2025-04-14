@@ -63,7 +63,7 @@ resource "aws_route_table_association" "public_assoc" {
   route_table_id = aws_route_table.public_rt.id
 }
 
-resource "aws_security_group" "allow_port_5000" {
+resource "aws_security_group" "main_app" {
   vpc_id = aws_vpc.main_vpc.id
 
   ingress {
@@ -149,9 +149,39 @@ resource "aws_iam_role_policy" "s3_read_policy" {
   })
 }
 
+resource "aws_iam_role_policy" "efs_mount_policy" {
+  name = "efs_mount_policy"
+  role = aws_iam_role.app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "elasticfilesystem:ClientMount",
+          "elasticfilesystem:ClientWrite",
+          "elasticfilesystem:DescribeMountTargets"
+        ],
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "cloud-gallery_profile" {
   name = "cloud-gallery-instance-profile"
   role = aws_iam_role.app_role.name
+}
+
+resource "aws_efs_file_system" "efs" {
+  creation_token = "my-efs"
+}
+
+resource "aws_efs_mount_target" "efs_mount" {
+  file_system_id = aws_efs_file_system.efs.id
+  subnet_id      = aws_subnet.public_subnet.id
+  security_groups = [aws_security_group.main_app.id]
 }
 
 resource "aws_instance" "cloud_gallery" {
@@ -159,7 +189,7 @@ resource "aws_instance" "cloud_gallery" {
   instance_type = "t2.micro"
   subnet_id     = aws_subnet.public_subnet.id
   vpc_security_group_ids = [
-    aws_security_group.allow_port_5000.id
+    aws_security_group.main_app.id
   ]
 
   iam_instance_profile = aws_iam_instance_profile.cloud-gallery_profile.name
