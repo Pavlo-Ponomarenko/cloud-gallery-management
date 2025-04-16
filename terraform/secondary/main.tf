@@ -92,6 +92,17 @@ resource "aws_security_group" "main_app" {
   }
 }
 
+resource "aws_security_group" "efs" {
+  vpc_id = aws_vpc.main_vpc.id
+
+  ingress {
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    security_groups = [aws_security_group.main_app.id]
+  }
+}
+
 resource "aws_iam_role" "app_role" {
   name = "cloud-gallery-role"
 
@@ -159,9 +170,8 @@ resource "aws_iam_role_policy" "efs_mount_policy" {
       {
         Effect = "Allow",
         Action = [
-          "elasticfilesystem:ClientMount",
-          "elasticfilesystem:ClientWrite",
-          "elasticfilesystem:DescribeMountTargets"
+          "elasticfilesystem:*",
+          "ec2:DescribeAvailabilityZones"
         ],
         Resource = "*"
       }
@@ -176,12 +186,16 @@ resource "aws_iam_instance_profile" "cloud-gallery_profile" {
 
 resource "aws_efs_file_system" "efs" {
   creation_token = "my-efs"
+
+  tags = {
+    Name = "main_efs"
+  }
 }
 
 resource "aws_efs_mount_target" "efs_mount" {
   file_system_id = aws_efs_file_system.efs.id
   subnet_id      = aws_subnet.public_subnet.id
-  security_groups = [aws_security_group.main_app.id]
+  security_groups = [aws_security_group.efs.id]
 }
 
 resource "aws_instance" "cloud_gallery" {
@@ -197,8 +211,6 @@ resource "aws_instance" "cloud_gallery" {
   key_name = aws_key_pair.ssh_key.key_name
 
   associate_public_ip_address = true
-
-  user_data = file("${path.module}/scripts/init_cloud-gallery_instance.sh")
 
   tags = {
     Name = "Cloud Gallery"
