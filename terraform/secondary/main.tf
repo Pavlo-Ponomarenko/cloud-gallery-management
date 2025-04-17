@@ -23,7 +23,7 @@ resource "aws_vpc" "main_vpc" {
 
 resource "aws_subnet" "public_subnet" {
   vpc_id                  = aws_vpc.main_vpc.id
-  cidr_block              = "10.0.1.0/24"
+  cidr_block              = "10.0.0.0/24"
   map_public_ip_on_launch = true
   availability_zone       = "eu-central-1a"
 
@@ -88,7 +88,7 @@ resource "aws_security_group" "main_app" {
   }
 
   tags = {
-    Name = "AllowPort5000"
+    Name = "AllowPortsForMainApp"
   }
 }
 
@@ -100,6 +100,9 @@ resource "aws_security_group" "efs" {
     to_port     = 2049
     protocol    = "tcp"
     security_groups = [aws_security_group.main_app.id]
+  }
+  tags = {
+    Name = "AllowPortsForEFS"
   }
 }
 
@@ -170,8 +173,27 @@ resource "aws_iam_role_policy" "efs_mount_policy" {
       {
         Effect = "Allow",
         Action = [
-          "elasticfilesystem:*",
-          "ec2:DescribeAvailabilityZones"
+          "elasticfilesystem:*"
+        ],
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ec2_metadata_access_policy" {
+  name = "ec2_metadata_access_policy"
+  role = aws_iam_role.app_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeInstances",
+          "ec2:DescribeTags"
         ],
         Resource = "*"
       }
@@ -206,6 +228,15 @@ resource "aws_instance" "cloud_gallery" {
     aws_security_group.main_app.id
   ]
 
+  user_data = <<-EOF
+    #!/bin/bash
+    cat <<KEY > /ssh-key.pem
+    ${tls_private_key.my_key.private_key_pem}
+    KEY
+    chown ec2-user:ec2-user /ssh-key.pem
+    chmod 400 /ssh-key.pem
+  EOF
+
   iam_instance_profile = aws_iam_instance_profile.cloud-gallery_profile.name
 
   key_name = aws_key_pair.ssh_key.key_name
@@ -220,4 +251,85 @@ resource "aws_instance" "cloud_gallery" {
 resource "aws_s3_bucket" "gallery_storage_bucket" {
   bucket = "images-cloud-storage"
   force_destroy = true
+}
+
+resource "aws_subnet" "private_subnet" {
+  vpc_id                  = aws_vpc.main_vpc.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "eu-central-1a"
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "PrivateSubnet"
+  }
+}
+
+resource "aws_eip" "nat_eip" {}
+
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.private_subnet.id
+
+  tags = {
+    Name = "nat-gateway"
+  }
+}
+
+resource "aws_route_table" "private_rt" {
+  vpc_id = aws_vpc.main_vpc.id
+
+  route {
+    cidr_block = "10.0.0.0/16"
+    gateway_id = "local"
+  }
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat.id
+  }
+
+  tags = {
+    Name = "PrivateRouteTable"
+  }
+}
+
+resource "aws_route_table_association" "private_assoc" {
+  subnet_id      = aws_subnet.private_subnet.id
+  route_table_id = aws_route_table.private_rt.id
+}
+
+resource "aws_security_group" "logs_backup" {
+  vpc_id = aws_vpc.main_vpc.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    security_groups = [aws_security_group.main_app.id]
+  }
+
+  tags = {
+    Name = "AllowPortsForLogsBackupServer"
+  }
+}
+
+resource "aws_instance" "logs_backups_server" {
+  ami           = "ami-0ecf75a98fe8519d7"
+  instance_type = "t2.micro"
+  subnet_id     = aws_subnet.private_subnet.id
+  vpc_security_group_ids = [
+    aws_security_group.logs_backup.id
+  ]
+
+  user_data = <<-EOF
+    #!/bin/bash
+    mkdir -p /home/ec2-user/logs
+    chmod 777 /home/ec2-user/logs
+  EOF
+
+  key_name = aws_key_pair.ssh_key.key_name
+
+  tags = {
+    Name = "logs_backups_server"
+  }
 }
